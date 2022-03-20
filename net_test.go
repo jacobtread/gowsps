@@ -23,7 +23,7 @@ func TestA(t *testing.T) {
 
 		var c *Connection
 
-		s.UpgradeAndHook(writer, request, func(conn *Connection, err error) {
+		s.UpgradeAndListen(writer, request, func(conn *Connection, err error) {
 			c = conn
 			if err != nil {
 				panic(err)
