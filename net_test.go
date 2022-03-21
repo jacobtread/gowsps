@@ -8,7 +8,7 @@ import (
 )
 
 type TestPacket struct {
-	Name string `json:"name"`
+	Name string
 }
 
 func onTestPacket(packet *TestPacket) {
@@ -30,7 +30,7 @@ func TestA(t *testing.T) {
 			}
 
 			p := TestPacket{Name: "Jacob"}
-			c.Send(Packet{Id: 0x00, Data: p})
+			c.Send(Packet{Id: 0x2, Data: p})
 		})
 
 		log.Println("Started connection", c)
