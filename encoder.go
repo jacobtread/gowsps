@@ -29,19 +29,6 @@ func (p *PacketBuffer) WriteVarInt(value VarInt) error {
 	return err
 }
 
-func (p *PacketBuffer) WriteByteArray(value []byte) error {
-	err := p.WriteVarInt(VarInt(len(value)))
-	if err != nil {
-		return err
-	}
-	b := []byte(value)
-	_, err = p.Write(b)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (p *PacketBuffer) ReadByteArray(length VarInt) ([]byte, error) {
 	buff := make([]byte, length)
 	count, err := io.ReadFull(p, buff)
@@ -54,8 +41,26 @@ func (p *PacketBuffer) ReadByteArray(length VarInt) ([]byte, error) {
 	return buff, nil
 }
 
+func ReadTypedNumberArray[T any](p *PacketBuffer) ([]T, error) {
+	l, err := binary.ReadUvarint(p)
+	if err != nil {
+		return nil, err
+	}
+	buff := make([]T, l)
+	err = binary.Read(p, binary.BigEndian, buff)
+	return buff, err
+}
+
 func (p *PacketBuffer) WriteString(value string) error {
-	return p.WriteByteArray([]byte(value))
+	v := []byte(value)
+	err := p.WriteVarInt(VarInt(len(v)))
+	if err != nil {
+		return err
+	}
+	if err = binary.Write(p, binary.BigEndian, v); err != nil {
+		return err
+	}
+	return nil
 }
 func (p *PacketBuffer) ReadString() (string, error) {
 	l, err := binary.ReadUvarint(p)
@@ -86,6 +91,17 @@ func (p *PacketBuffer) MarshalPacket(packet Packet) error {
 			if err := p.WriteString(v.(string)); err != nil {
 				return err
 			}
+		case []string:
+			values := v.([]string)
+			err := p.WriteVarInt(VarInt(len(values)))
+			if err != nil {
+				return err
+			}
+			for _, value := range values {
+				if err := p.WriteString(value); err != nil {
+					return err
+				}
+			}
 		case bool:
 			if v.(bool) {
 				if err := p.WriteByte(1); err != nil {
@@ -96,12 +112,18 @@ func (p *PacketBuffer) MarshalPacket(packet Packet) error {
 					return err
 				}
 			}
-		case uint8, uint16, uint32, int8, int16, int32, float32, float64:
+		case uint8, uint16, uint32, int8,
+			int16, int32, float32, float64:
 			if err := binary.Write(p, binary.BigEndian, v); err != nil {
 				return err
 			}
-		case []byte:
-			if err := p.WriteByteArray(v.([]byte)); err != nil {
+		case []byte, []uint16, []uint32, []int16, []int8,
+			[]int32, []float32, []float64, []bool:
+			err := p.WriteVarInt(VarInt(len(v.([]interface{}))))
+			if err != nil {
+				return err
+			}
+			if err := binary.Write(p, binary.BigEndian, v); err != nil {
 				return err
 			}
 		case VarInt:
@@ -116,11 +138,12 @@ func (p *PacketBuffer) MarshalPacket(packet Packet) error {
 }
 
 func (p *PacketBuffer) UnMarshalPacket(out any) error {
-	v := reflect.ValueOf(out).Elem()
-	fc := v.NumField()
+	rV := reflect.ValueOf(out).Elem()
+	fc := rV.NumField()
+	var v interface{}
 	for i := 0; i < fc; i++ {
-		fv := v.Field(i)
-		v := fv.Interface()
+		fv := rV.Field(i)
+		v = fv.Interface()
 		switch v.(type) {
 		case string:
 			s, err := p.ReadString()
@@ -134,7 +157,6 @@ func (p *PacketBuffer) UnMarshalPacket(out any) error {
 				return err
 			}
 			fv.SetBool(a == 1)
-
 		case uint8:
 			var out uint8
 			err := binary.Read(p, binary.BigEndian, &out)
@@ -156,7 +178,6 @@ func (p *PacketBuffer) UnMarshalPacket(out any) error {
 				return err
 			}
 			fv.Set(reflect.ValueOf(out))
-
 		case int8:
 			var out int8
 			err := binary.Read(p, binary.BigEndian, &out)
@@ -178,6 +199,12 @@ func (p *PacketBuffer) UnMarshalPacket(out any) error {
 				return err
 			}
 			fv.Set(reflect.ValueOf(out))
+		case VarInt:
+			l, err := binary.ReadUvarint(p)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(VarInt(l)))
 		case float32:
 			var out float32
 			err := binary.Read(p, binary.BigEndian, &out)
@@ -192,6 +219,26 @@ func (p *PacketBuffer) UnMarshalPacket(out any) error {
 				return err
 			}
 			fv.Set(reflect.ValueOf(out))
+		case []string:
+			l, err := binary.ReadUvarint(p)
+			if err != nil {
+				return err
+			}
+			out := make([]string, l)
+			var buff []byte
+			for i := uint64(0); i < l; i++ {
+				l, err = binary.ReadUvarint(p)
+				if err != nil {
+					return err
+				}
+				buff, err = p.ReadByteArray(VarInt(l))
+				if err != nil {
+					return err
+				}
+				out[i] = string(buff)
+			}
+			fv.Set(reflect.ValueOf(out))
+
 		case []byte:
 			l, err := binary.ReadUvarint(p)
 			if err != nil {
@@ -202,12 +249,55 @@ func (p *PacketBuffer) UnMarshalPacket(out any) error {
 				return err
 			}
 			fv.SetBytes(buff)
-		case VarInt:
-			l, err := binary.ReadUvarint(p)
+		case []uint16:
+			v, err := ReadTypedNumberArray[uint16](p)
 			if err != nil {
 				return err
 			}
-			fv.Set(reflect.ValueOf(VarInt(l)))
+			fv.Set(reflect.ValueOf(v))
+		case []uint32:
+			v, err := ReadTypedNumberArray[uint32](p)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(v))
+
+		case []int8:
+			v, err := ReadTypedNumberArray[int8](p)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(v))
+		case []int16:
+			v, err := ReadTypedNumberArray[int16](p)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(v))
+		case []int32:
+			v, err := ReadTypedNumberArray[int32](p)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(v))
+		case []float32:
+			v, err := ReadTypedNumberArray[float32](p)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(v))
+		case []float64:
+			v, err := ReadTypedNumberArray[float64](p)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(v))
+		case []bool:
+			v, err := ReadTypedNumberArray[bool](p)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(v))
 		}
 	}
 	return nil
