@@ -58,7 +58,7 @@ func (p *PacketBuffer) WriteString(value string) error {
 	return p.WriteByteArray([]byte(value))
 }
 func (p *PacketBuffer) ReadString() (string, error) {
-	l, err := binary.ReadVarint(p)
+	l, err := binary.ReadUvarint(p)
 	if err != nil {
 		return "", err
 	}
@@ -116,16 +116,13 @@ func (p *PacketBuffer) MarshalPacket(packet Packet) error {
 }
 
 func (p *PacketBuffer) UnMarshalPacket(out any) error {
-	t := reflect.TypeOf(out)
-	v := reflect.ValueOf(out)
+	v := reflect.ValueOf(out).Elem()
 	fc := v.NumField()
 	for i := 0; i < fc; i++ {
-		ft := t.Field(i)
 		fv := v.Field(i)
 		v := fv.Interface()
 		switch v.(type) {
 		case string:
-			fmt.Println(ft.Name)
 			s, err := p.ReadString()
 			if err != nil {
 				return err
@@ -137,13 +134,66 @@ func (p *PacketBuffer) UnMarshalPacket(out any) error {
 				return err
 			}
 			fv.SetBool(a == 1)
-		case uint8, uint16, uint32, int8, int16, int32, float32, float64:
-			err := binary.Read(p, binary.BigEndian, &v)
+
+		case uint8:
+			var out uint8
+			err := binary.Read(p, binary.BigEndian, &out)
 			if err != nil {
 				return err
 			}
+			fv.Set(reflect.ValueOf(out))
+		case uint16:
+			var out uint16
+			err := binary.Read(p, binary.BigEndian, &out)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(out))
+		case uint32:
+			var out uint32
+			err := binary.Read(p, binary.BigEndian, &out)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(out))
+
+		case int8:
+			var out int8
+			err := binary.Read(p, binary.BigEndian, &out)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(out))
+		case int16:
+			var out int16
+			err := binary.Read(p, binary.BigEndian, &out)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(out))
+		case int32:
+			var out int32
+			err := binary.Read(p, binary.BigEndian, &out)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(out))
+		case float32:
+			var out float32
+			err := binary.Read(p, binary.BigEndian, &out)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(out))
+		case float64:
+			var out float64
+			err := binary.Read(p, binary.BigEndian, &out)
+			if err != nil {
+				return err
+			}
+			fv.Set(reflect.ValueOf(out))
 		case []byte:
-			l, err := binary.ReadVarint(p)
+			l, err := binary.ReadUvarint(p)
 			if err != nil {
 				return err
 			}
@@ -153,7 +203,7 @@ func (p *PacketBuffer) UnMarshalPacket(out any) error {
 			}
 			fv.SetBytes(buff)
 		case VarInt:
-			l, err := binary.ReadVarint(p)
+			l, err := binary.ReadUvarint(p)
 			if err != nil {
 				return err
 			}

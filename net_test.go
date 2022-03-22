@@ -9,15 +9,16 @@ import (
 
 type TestPacket struct {
 	Name string
+	User uint8
 }
 
 func onTestPacket(packet *TestPacket) {
-	fmt.Println(packet.Name)
+	fmt.Printf("Name %s %d\n", packet.Name, packet.User)
 }
 
 func TestA(t *testing.T) {
 	s := NewPacketSystem()
-	AddHandler(s, 0x00, onTestPacket)
+	AddHandler(s, 0x02, onTestPacket)
 
 	http.HandleFunc("/ws", func(writer http.ResponseWriter, request *http.Request) {
 
@@ -29,7 +30,7 @@ func TestA(t *testing.T) {
 				panic(err)
 			}
 
-			p := TestPacket{Name: "Jacob"}
+			p := TestPacket{Name: "Jacob", User: 2}
 			c.Send(Packet{Id: 0x2, Data: p})
 		})
 

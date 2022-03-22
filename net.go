@@ -115,7 +115,7 @@ func (s *PacketSystem) UpgradeAndListen(w http.ResponseWriter, r *http.Request, 
 func AddHandler[T any](s *PacketSystem, id VarInt, handler func(packet *T)) {
 	s.Handlers[id] = func(c *Connection) { // Set the packet decoder for this ID
 		out := new(T) // Create a new instance of the output type
-		_ = c.Buffer.UnMarshalPacket(*out)
+		_ = c.Buffer.UnMarshalPacket(out)
 		handler(out)
 	}
 }
