@@ -61,7 +61,7 @@ type Connection struct {
 func (conn *Connection) Send(packet Packet) {
 	if conn.Open { // If the connection is open
 		conn.Lock.Lock() // Acquire write lock
-		err := conn.Buffer.MarshalPacket(packet)
+		err := MarshalPacket(conn.Buffer, packet)
 		if err == nil {
 			_ = conn.WriteMessage(websocket.BinaryMessage, conn.Buffer.Bytes())
 		}
@@ -115,7 +115,7 @@ func (s *PacketSystem) UpgradeAndListen(w http.ResponseWriter, r *http.Request, 
 func AddHandler[T any](s *PacketSystem, id VarInt, handler func(packet *T)) {
 	s.Handlers[id] = func(c *Connection) { // Set the packet decoder for this ID
 		out := new(T) // Create a new instance of the output type
-		_ = c.Buffer.UnMarshalPacket(out)
+		_ = UnMarshalPacket(c.Buffer, out)
 		handler(out)
 	}
 }

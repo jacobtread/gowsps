@@ -7,9 +7,15 @@ import (
 	"testing"
 )
 
+type TestNest struct {
+	Name  string
+	Value uint8
+}
+
 type TestPacket struct {
-	Name string
-	User uint8
+	Name   string
+	User   uint8
+	Values []TestNest
 }
 
 func onTestPacket(packet *TestPacket) {
@@ -30,7 +36,10 @@ func TestA(t *testing.T) {
 				panic(err)
 			}
 
-			p := TestPacket{Name: "Jacob", User: 2}
+			p := TestPacket{Name: "Jacob", User: 2, Values: []TestNest{
+				{"HI", 12},
+				{"HI 2", 15},
+			}}
 			c.Send(Packet{Id: 0x2, Data: p})
 		})
 

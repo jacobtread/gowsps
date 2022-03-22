@@ -41,16 +41,6 @@ func (p *PacketBuffer) ReadByteArray(length VarInt) ([]byte, error) {
 	return buff, nil
 }
 
-func ReadTypedNumberArray[T any](p *PacketBuffer) ([]T, error) {
-	l, err := binary.ReadUvarint(p)
-	if err != nil {
-		return nil, err
-	}
-	buff := make([]T, l)
-	err = binary.Read(p, binary.BigEndian, buff)
-	return buff, err
-}
-
 func (p *PacketBuffer) WriteString(value string) error {
 	v := []byte(value)
 	err := p.WriteVarInt(VarInt(len(v)))
@@ -62,6 +52,7 @@ func (p *PacketBuffer) WriteString(value string) error {
 	}
 	return nil
 }
+
 func (p *PacketBuffer) ReadString() (string, error) {
 	l, err := binary.ReadUvarint(p)
 	if err != nil {
@@ -74,231 +65,242 @@ func (p *PacketBuffer) ReadString() (string, error) {
 	return string(buff), nil
 }
 
-func (p *PacketBuffer) MarshalPacket(packet Packet) error {
+func MarshalPacket(p *PacketBuffer, packet Packet) error {
 	err := p.WriteVarInt(packet.Id)
 	if err != nil {
 		return err
 	}
+	err = marshalPacketData(p, packet.Data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
-	data := packet.Data
-	v := reflect.ValueOf(data)
-	fc := v.NumField()
-	for i := 0; i < fc; i++ {
-		fv := v.Field(i)
-		v := fv.Interface()
-		switch v.(type) {
-		case string:
-			if err := p.WriteString(v.(string)); err != nil {
-				return err
+func marshalPacketData(p *PacketBuffer, data any) error {
+	err := marshalValue(p, data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func marshalValue(p *PacketBuffer, b any) error {
+	x := reflect.ValueOf(b)
+	rk := x.Kind()
+	switch rk {
+	case reflect.Struct:
+		fc := x.NumField()
+		for i := 0; i < fc; i++ {
+			fb := x.Field(i)
+			k := fb.Kind()
+			v := fb.Interface()
+			var err error
+			switch k {
+			case reflect.Struct:
+				err = marshalValue(p, v)
+			case reflect.Slice:
+				err = marshalSlice(p, v)
+				if err != nil {
+					return err
+				}
+			default:
+				err = marshalPrimitive(p, reflect.ValueOf(v))
+				if err != nil {
+					return err
+				}
 			}
-		case []string:
-			values := v.([]string)
-			err := p.WriteVarInt(VarInt(len(values)))
 			if err != nil {
 				return err
 			}
-			for _, value := range values {
-				if err := p.WriteString(value); err != nil {
-					return err
-				}
-			}
-		case bool:
-			if v.(bool) {
-				if err := p.WriteByte(1); err != nil {
-					return err
-				}
-			} else {
-				if err := p.WriteByte(0); err != nil {
-					return err
-				}
-			}
-		case uint8, uint16, uint32, int8,
-			int16, int32, float32, float64:
-			if err := binary.Write(p, binary.BigEndian, v); err != nil {
-				return err
-			}
-		case []byte, []uint16, []uint32, []int16, []int8,
-			[]int32, []float32, []float64, []bool:
-			err := p.WriteVarInt(VarInt(len(v.([]interface{}))))
+		}
+	case reflect.Slice:
+		err := marshalSlice(p, b)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func marshalSlice(p *PacketBuffer, v any) error {
+	t := reflect.TypeOf(v)
+	vl := reflect.ValueOf(v)
+	l := vl.Len()
+	err := p.WriteVarInt(VarInt(l))
+	if err != nil {
+		return err
+	}
+	tk := t.Elem().Kind()
+	fmt.Println(tk, l)
+	switch tk {
+	case reflect.Struct:
+		for i := 0; i < l; i++ {
+			vi := vl.Index(i).Interface()
+			err := marshalValue(p, vi)
 			if err != nil {
 				return err
 			}
-			if err := binary.Write(p, binary.BigEndian, v); err != nil {
+		}
+	case reflect.Slice:
+		for i := 0; i < l; i++ {
+			vi := vl.Index(i).Interface()
+			err := marshalSlice(p, vi)
+			if err != nil {
 				return err
 			}
-		case VarInt:
-			err := p.WriteVarInt(v.(VarInt))
+		}
+	default:
+		for i := 0; i < l; i++ {
+			vi := vl.Index(i)
+			err := marshalPrimitive(p, vi)
 			if err != nil {
 				return err
 			}
 		}
 	}
-	fmt.Println(p.Buffer.Bytes())
 	return nil
 }
 
-func (p *PacketBuffer) UnMarshalPacket(out any) error {
-	rV := reflect.ValueOf(out).Elem()
-	fc := rV.NumField()
-	var v interface{}
-	for i := 0; i < fc; i++ {
-		fv := rV.Field(i)
-		v = fv.Interface()
-		switch v.(type) {
-		case string:
-			s, err := p.ReadString()
-			if err != nil {
-				return err
-			}
-			fv.SetString(s)
-		case bool:
-			a, err := p.ReadByte()
-			if err != nil {
-				return err
-			}
-			fv.SetBool(a == 1)
-		case uint8:
-			var out uint8
-			err := binary.Read(p, binary.BigEndian, &out)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(out))
-		case uint16:
-			var out uint16
-			err := binary.Read(p, binary.BigEndian, &out)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(out))
-		case uint32:
-			var out uint32
-			err := binary.Read(p, binary.BigEndian, &out)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(out))
-		case int8:
-			var out int8
-			err := binary.Read(p, binary.BigEndian, &out)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(out))
-		case int16:
-			var out int16
-			err := binary.Read(p, binary.BigEndian, &out)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(out))
-		case int32:
-			var out int32
-			err := binary.Read(p, binary.BigEndian, &out)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(out))
-		case VarInt:
-			l, err := binary.ReadUvarint(p)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(VarInt(l)))
-		case float32:
-			var out float32
-			err := binary.Read(p, binary.BigEndian, &out)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(out))
-		case float64:
-			var out float64
-			err := binary.Read(p, binary.BigEndian, &out)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(out))
-		case []string:
-			l, err := binary.ReadUvarint(p)
-			if err != nil {
-				return err
-			}
-			out := make([]string, l)
-			var buff []byte
-			for i := uint64(0); i < l; i++ {
-				l, err = binary.ReadUvarint(p)
-				if err != nil {
-					return err
-				}
-				buff, err = p.ReadByteArray(VarInt(l))
-				if err != nil {
-					return err
-				}
-				out[i] = string(buff)
-			}
-			fv.Set(reflect.ValueOf(out))
-
-		case []byte:
-			l, err := binary.ReadUvarint(p)
-			if err != nil {
-				return err
-			}
-			buff, err := p.ReadByteArray(VarInt(l))
-			if err != nil {
-				return err
-			}
-			fv.SetBytes(buff)
-		case []uint16:
-			v, err := ReadTypedNumberArray[uint16](p)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(v))
-		case []uint32:
-			v, err := ReadTypedNumberArray[uint32](p)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(v))
-
-		case []int8:
-			v, err := ReadTypedNumberArray[int8](p)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(v))
-		case []int16:
-			v, err := ReadTypedNumberArray[int16](p)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(v))
-		case []int32:
-			v, err := ReadTypedNumberArray[int32](p)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(v))
-		case []float32:
-			v, err := ReadTypedNumberArray[float32](p)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(v))
-		case []float64:
-			v, err := ReadTypedNumberArray[float64](p)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(v))
-		case []bool:
-			v, err := ReadTypedNumberArray[bool](p)
-			if err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(v))
+func marshalPrimitive(p *PacketBuffer, r reflect.Value) error {
+	v := r.Interface()
+	switch v.(type) {
+	case VarInt:
+		err := p.WriteVarInt(v.(VarInt))
+		if err != nil {
+			return err
 		}
+	case bool, uint8, uint16, uint32, int8,
+		int16, int32, float32, float64:
+		if err := binary.Write(p, binary.BigEndian, v); err != nil {
+			return err
+		}
+	case string:
+		if err := p.WriteString(v.(string)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func UnMarshalPacket(p *PacketBuffer, out any) error {
+	err := unmarshalValue(p, out)
+	return err
+}
+
+func unmarshalValue(p *PacketBuffer, b any) error {
+	x := reflect.ValueOf(b)
+	rk := x.Kind()
+	switch rk {
+	case reflect.Struct:
+		fc := x.NumField()
+		for i := 0; i < fc; i++ {
+			fb := x.Field(i)
+			k := fb.Kind()
+			v := fb.Interface()
+			var err error
+			switch k {
+			case reflect.Struct:
+				err = unmarshalValue(p, v)
+			case reflect.Slice:
+				err = unmarshalSlice(p, v)
+				if err != nil {
+					return err
+				}
+			default:
+				err = unmarshalPrimitive(p, reflect.ValueOf(v))
+				if err != nil {
+					return err
+				}
+			}
+			if err != nil {
+				return err
+			}
+		}
+	case reflect.Slice:
+		err := unmarshalSlice(p, b)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func unmarshalSlice(p *PacketBuffer, v any) error {
+	t := reflect.TypeOf(v)
+	vl := reflect.ValueOf(v)
+	le, err := binary.ReadUvarint(p)
+	if err != nil {
+		return err
+	}
+	l := int(le)
+	te := t.Elem()
+	tk := te.Kind()
+
+	vl.SetLen(l)
+
+	switch tk {
+	case reflect.Struct:
+		for i := 0; i < l; i++ {
+			vi := vl.Index(i)
+			err = unmarshalValue(p, vi)
+			if err != nil {
+				return err
+			}
+		}
+	case reflect.Slice:
+		for i := 0; i < l; i++ {
+			vi := vl.Index(i)
+			err = unmarshalSlice(p, vi)
+			if err != nil {
+				return err
+			}
+		}
+	case reflect.Uint8:
+		buff := make([]byte, l)
+		count, err := io.ReadFull(p, buff)
+		if err != nil {
+			return err
+		}
+		if count != int(l) {
+			return errors.New("incorrect length")
+		}
+		vl.SetBytes(buff)
+	default:
+		for i := 0; i < l; i++ {
+			vi := vl.Index(i)
+			err = unmarshalPrimitive(p, vi)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func unmarshalPrimitive(p *PacketBuffer, r reflect.Value) error {
+	v := r.Interface()
+	switch v.(type) {
+	case VarInt:
+		val, err := binary.ReadUvarint(p)
+		if err != nil {
+			return err
+		}
+		r.Set(reflect.ValueOf(VarInt(val)))
+	case uint8, uint16, uint32,
+		int8, int16, int32,
+		float32, float64, bool:
+		if err := binary.Read(p, binary.BigEndian, &v); err != nil {
+			return err
+		}
+		r.Set(reflect.ValueOf(v))
+	case string:
+		val, err := p.ReadString()
+		if err != nil {
+			return err
+		}
+		r.SetString(val)
 	}
 	return nil
 }
