@@ -144,5 +144,7 @@ func (s *PacketSystem) DecodePacket(c *Connection) error {
 	} else {
 		handler(c) // Call the handler function
 	}
+	c.ReadBuffer.Reset()
+	c.ReadBuffer = nil
 	return nil
 }
