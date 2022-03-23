@@ -1,11 +1,11 @@
 package gowsps
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/gorilla/websocket"
+	"io"
 	"net/http"
 	"sync"
 )
@@ -59,14 +59,19 @@ type Connection struct {
 
 // Send function for sending packets to the client. Will only send if
 // the connection is open. Acquires write locks before sending packet
-func (conn *Connection) Send(packet Packet) {
+func (conn *Connection) Send(packet *Packet) {
 	if conn.Open { // If the connection is open
 		conn.Lock.Lock() // Acquire write lock
 		err := MarshalPacket(conn.WriteBuffer, packet)
-		if err == nil {
-			_ = conn.WriteMessage(websocket.BinaryMessage, conn.WriteBuffer.Bytes())
+		if err != nil {
+			return
 		}
-		conn.WriteBuffer.Reset()
+		var w io.Writer
+		w, err = conn.NextWriter(websocket.BinaryMessage)
+		_, err = conn.WriteBuffer.WriteTo(w)
+		if err != nil {
+			return
+		}
 		conn.Lock.Unlock() // Release write lock
 	}
 }
@@ -126,14 +131,19 @@ func AddHandler[T any](s *PacketSystem, id VarInt, handler func(packet *T)) {
 // and the ReadJSON function to take the incoming data and then calls the handler function. This
 // function will return an error if it failed to decode the packet
 func (s *PacketSystem) DecodePacket(c *Connection) error {
-	t, m, err := c.ReadMessage()
+	t, r, err := c.NextReader()
 	if err != nil {
 		return err
 	}
 	if t != websocket.BinaryMessage {
 		return nil
 	}
-	c.ReadBuffer.Buffer = bytes.NewBuffer(m)
+	b := c.ReadBuffer
+	b.Buffer.Reset()
+	_, err = b.Buffer.ReadFrom(r)
+	if err != nil {
+		return err
+	}
 	id, err := binary.ReadUvarint(c.ReadBuffer)
 	if err != nil {
 		return err
@@ -144,7 +154,6 @@ func (s *PacketSystem) DecodePacket(c *Connection) error {
 	} else {
 		handler(c) // Call the handler function
 	}
-	c.ReadBuffer.Reset()
-	c.ReadBuffer = nil
+	b.Reset()
 	return nil
 }

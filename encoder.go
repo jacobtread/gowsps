@@ -64,7 +64,7 @@ func (p *PacketBuffer) ReadString() (string, error) {
 	return string(buff), nil
 }
 
-func MarshalPacket(p *PacketBuffer, packet Packet) error {
+func MarshalPacket(p *PacketBuffer, packet *Packet) error {
 	err := p.WriteVarInt(packet.Id)
 	if err != nil {
 		return err
