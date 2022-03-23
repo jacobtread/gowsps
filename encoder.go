@@ -245,7 +245,6 @@ func unmarshalSlice(p *PacketBuffer, vl reflect.Value) error {
 	te := t.Elem()
 
 	tk := te.Kind()
-
 	s := reflect.MakeSlice(t, l, l)
 	vl.Set(s)
 
@@ -319,9 +318,56 @@ func unmarshalPrimitive(p *PacketBuffer, r reflect.Value) error {
 			return err
 		}
 		r.Set(reflect.ValueOf(VarInt(val)))
-	case uint8, uint16, uint32,
-		int8, int16, int32,
-		float32, float64, bool:
+	case uint8:
+		var out uint8
+		if err := binary.Read(p, binary.BigEndian, &out); err != nil {
+			return err
+		}
+		r.Set(reflect.ValueOf(out))
+	case uint16:
+		var out uint16
+		if err := binary.Read(p, binary.BigEndian, &out); err != nil {
+			return err
+		}
+		r.Set(reflect.ValueOf(out))
+	case uint32:
+		var out uint32
+		if err := binary.Read(p, binary.BigEndian, &out); err != nil {
+			return err
+		}
+		r.Set(reflect.ValueOf(out))
+
+	case int8:
+		var out int8
+		if err := binary.Read(p, binary.BigEndian, &out); err != nil {
+			return err
+		}
+		r.Set(reflect.ValueOf(out))
+	case int16:
+		var out int16
+		if err := binary.Read(p, binary.BigEndian, &out); err != nil {
+			return err
+		}
+		r.Set(reflect.ValueOf(out))
+	case int32:
+		var out int32
+		if err := binary.Read(p, binary.BigEndian, &out); err != nil {
+			return err
+		}
+		r.Set(reflect.ValueOf(out))
+	case float32:
+		var out float32
+		if err := binary.Read(p, binary.BigEndian, &out); err != nil {
+			return err
+		}
+		r.Set(reflect.ValueOf(out))
+	case float64:
+		var out float64
+		if err := binary.Read(p, binary.BigEndian, &out); err != nil {
+			return err
+		}
+		r.Set(reflect.ValueOf(out))
+	case bool:
 		if err := binary.Read(p, binary.BigEndian, &v); err != nil {
 			return err
 		}
