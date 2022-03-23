@@ -88,40 +88,32 @@ func marshalPacketData(p *PacketBuffer, data any) error {
 func marshalValue(p *PacketBuffer, b any) error {
 	x := reflect.ValueOf(b)
 	rk := x.Kind()
+	var err error
 	switch rk {
 	case reflect.Struct:
 		fc := x.NumField()
 		for i := 0; i < fc; i++ {
 			fb := x.Field(i)
-			k := fb.Kind()
 			v := fb.Interface()
-			var err error
-			switch k {
-			case reflect.Struct:
-				err = marshalValue(p, v)
-			case reflect.Slice:
-				err = marshalSlice(p, v)
-				if err != nil {
-					return err
-				}
-			default:
-				err = marshalPrimitive(p, reflect.ValueOf(v))
-				if err != nil {
-					return err
-				}
-			}
-			if err != nil {
-				return err
-			}
+			err = marshalValue(p, v)
 		}
 	case reflect.Slice:
 		err := marshalSlice(p, b)
 		if err != nil {
 			return err
 		}
+	case reflect.Map:
+		err := marshalMap(p, b)
+		if err != nil {
+			return err
+		}
+	default:
+		err = marshalPrimitive(p, reflect.ValueOf(b))
+		if err != nil {
+			return err
+		}
 	}
-
-	return nil
+	return err
 }
 
 func marshalSlice(p *PacketBuffer, v any) error {
@@ -163,6 +155,30 @@ func marshalSlice(p *PacketBuffer, v any) error {
 	return nil
 }
 
+func marshalMap(p *PacketBuffer, v any) error {
+	vl := reflect.ValueOf(v)
+	count := vl.Len()
+	err := p.WriteVarInt(VarInt(count))
+	if err != nil {
+		return err
+	}
+	keys := vl.MapKeys()
+	for _, key := range keys {
+		f := vl.MapIndex(key)
+		ki := key.Interface()
+		vi := f.Interface()
+		err = marshalPrimitive(p, reflect.ValueOf(ki))
+		if err != nil {
+			return err
+		}
+		err = marshalValue(p, vi)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func marshalPrimitive(p *PacketBuffer, r reflect.Value) error {
 	v := r.Interface()
 	switch v.(type) {
@@ -192,39 +208,32 @@ func UnMarshalPacket(p *PacketBuffer, out any) error {
 func unmarshalValue(p *PacketBuffer, b any) error {
 	x := reflect.ValueOf(b)
 	rk := x.Kind()
+	var err error
 	switch rk {
 	case reflect.Struct:
 		fc := x.NumField()
 		for i := 0; i < fc; i++ {
 			fb := x.Field(i)
-			k := fb.Kind()
 			v := fb.Interface()
-			var err error
-			switch k {
-			case reflect.Struct:
-				err = unmarshalValue(p, v)
-			case reflect.Slice:
-				err = unmarshalSlice(p, v)
-				if err != nil {
-					return err
-				}
-			default:
-				err = unmarshalPrimitive(p, reflect.ValueOf(v))
-				if err != nil {
-					return err
-				}
-			}
-			if err != nil {
-				return err
-			}
+			err = unmarshalValue(p, v)
 		}
 	case reflect.Slice:
-		err := unmarshalSlice(p, b)
+		err = unmarshalSlice(p, b)
+		if err != nil {
+			return err
+		}
+	case reflect.Map:
+		err = unmarshalMap(p, b)
+		if err != nil {
+			return err
+		}
+	default:
+		err = unmarshalPrimitive(p, reflect.ValueOf(b))
 		if err != nil {
 			return err
 		}
 	}
-	return nil
+	return err
 }
 
 func unmarshalSlice(p *PacketBuffer, v any) error {
@@ -237,9 +246,7 @@ func unmarshalSlice(p *PacketBuffer, v any) error {
 	l := int(le)
 	te := t.Elem()
 	tk := te.Kind()
-
 	vl.SetLen(l)
-
 	switch tk {
 	case reflect.Struct:
 		for i := 0; i < l; i++ {
@@ -274,6 +281,29 @@ func unmarshalSlice(p *PacketBuffer, v any) error {
 			if err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func unmarshalMap(p *PacketBuffer, v any) error {
+	count, err := binary.ReadUvarint(p)
+	if err != nil {
+		return err
+	}
+	t := reflect.TypeOf(v)
+	kt := t.Key()
+	vt := t.Elem()
+	for i := uint64(0); i < count; i++ {
+		key := reflect.New(kt)
+		err = unmarshalPrimitive(p, key)
+		if err != nil {
+			return err
+		}
+		value := reflect.New(vt)
+		err = unmarshalValue(p, value.Interface())
+		if err != nil {
+			return err
 		}
 	}
 	return nil
