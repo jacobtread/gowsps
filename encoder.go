@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"reflect"
 )
@@ -125,7 +124,6 @@ func marshalSlice(p *PacketBuffer, v any) error {
 		return err
 	}
 	tk := t.Elem().Kind()
-	fmt.Println(tk, l)
 	switch tk {
 	case reflect.Struct:
 		for i := 0; i < l; i++ {
@@ -201,12 +199,14 @@ func marshalPrimitive(p *PacketBuffer, r reflect.Value) error {
 }
 
 func UnMarshalPacket(p *PacketBuffer, out any) error {
-	err := unmarshalValue(p, out)
-	return err
+	return unmarshalValue(p, reflect.ValueOf(out).Elem())
 }
 
-func unmarshalValue(p *PacketBuffer, b any) error {
-	x := reflect.ValueOf(b)
+func unmarshalValue(p *PacketBuffer, x reflect.Value) error {
+	if x.Kind() == reflect.Pointer {
+		x = x.Elem()
+	}
+	t := x.Type()
 	rk := x.Kind()
 	var err error
 	switch rk {
@@ -214,21 +214,20 @@ func unmarshalValue(p *PacketBuffer, b any) error {
 		fc := x.NumField()
 		for i := 0; i < fc; i++ {
 			fb := x.Field(i)
-			v := fb.Interface()
-			err = unmarshalValue(p, v)
+			err = unmarshalValue(p, fb)
 		}
 	case reflect.Slice:
-		err = unmarshalSlice(p, b)
+		err = unmarshalSlice(p, x)
 		if err != nil {
 			return err
 		}
 	case reflect.Map:
-		err = unmarshalMap(p, b)
+		err = unmarshalMap(p, t)
 		if err != nil {
 			return err
 		}
 	default:
-		err = unmarshalPrimitive(p, reflect.ValueOf(b))
+		err = unmarshalPrimitive(p, x)
 		if err != nil {
 			return err
 		}
@@ -236,17 +235,20 @@ func unmarshalValue(p *PacketBuffer, b any) error {
 	return err
 }
 
-func unmarshalSlice(p *PacketBuffer, v any) error {
-	t := reflect.TypeOf(v)
-	vl := reflect.ValueOf(v)
+func unmarshalSlice(p *PacketBuffer, vl reflect.Value) error {
 	le, err := binary.ReadUvarint(p)
 	if err != nil {
 		return err
 	}
 	l := int(le)
+	t := vl.Type()
 	te := t.Elem()
+
 	tk := te.Kind()
-	vl.SetLen(l)
+
+	s := reflect.MakeSlice(t, l, l)
+	vl.Set(s)
+
 	switch tk {
 	case reflect.Struct:
 		for i := 0; i < l; i++ {
@@ -286,12 +288,11 @@ func unmarshalSlice(p *PacketBuffer, v any) error {
 	return nil
 }
 
-func unmarshalMap(p *PacketBuffer, v any) error {
+func unmarshalMap(p *PacketBuffer, t reflect.Type) error {
 	count, err := binary.ReadUvarint(p)
 	if err != nil {
 		return err
 	}
-	t := reflect.TypeOf(v)
 	kt := t.Key()
 	vt := t.Elem()
 	for i := uint64(0); i < count; i++ {
@@ -301,7 +302,7 @@ func unmarshalMap(p *PacketBuffer, v any) error {
 			return err
 		}
 		value := reflect.New(vt)
-		err = unmarshalValue(p, value.Interface())
+		err = unmarshalValue(p, value)
 		if err != nil {
 			return err
 		}
@@ -330,7 +331,7 @@ func unmarshalPrimitive(p *PacketBuffer, r reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		r.SetString(val)
+		r.Set(reflect.ValueOf(val))
 	}
 	return nil
 }

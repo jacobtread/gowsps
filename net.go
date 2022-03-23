@@ -49,9 +49,10 @@ var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { retu
 // as the reference to the websocket connection and write lock for
 // preventing concurrently packet writes
 type Connection struct {
-	Lock   *sync.RWMutex
-	Open   bool
-	Buffer *PacketBuffer
+	Lock        *sync.RWMutex
+	Open        bool
+	ReadBuffer  *PacketBuffer
+	WriteBuffer *PacketBuffer
 
 	*websocket.Conn
 }
@@ -61,11 +62,11 @@ type Connection struct {
 func (conn *Connection) Send(packet Packet) {
 	if conn.Open { // If the connection is open
 		conn.Lock.Lock() // Acquire write lock
-		err := MarshalPacket(conn.Buffer, packet)
+		err := MarshalPacket(conn.WriteBuffer, packet)
 		if err == nil {
-			_ = conn.WriteMessage(websocket.BinaryMessage, conn.Buffer.Bytes())
+			_ = conn.WriteMessage(websocket.BinaryMessage, conn.WriteBuffer.Bytes())
 		}
-		conn.Buffer.Reset()
+		conn.WriteBuffer.Reset()
 		conn.Lock.Unlock() // Release write lock
 	}
 }
@@ -81,10 +82,11 @@ func (s *PacketSystem) UpgradeAndListen(w http.ResponseWriter, r *http.Request, 
 
 	// Create a new connection structure
 	conn := &Connection{
-		Open:   true,
-		Lock:   &sync.RWMutex{},
-		Conn:   ws,
-		Buffer: NewPacketBuffer(),
+		Open:        true,
+		Lock:        &sync.RWMutex{},
+		Conn:        ws,
+		ReadBuffer:  NewPacketBuffer(),
+		WriteBuffer: NewPacketBuffer(),
 	}
 
 	// When the websocket connection becomes closed
@@ -115,7 +117,7 @@ func (s *PacketSystem) UpgradeAndListen(w http.ResponseWriter, r *http.Request, 
 func AddHandler[T any](s *PacketSystem, id VarInt, handler func(packet *T)) {
 	s.Handlers[id] = func(c *Connection) { // Set the packet decoder for this ID
 		out := new(T) // Create a new instance of the output type
-		_ = UnMarshalPacket(c.Buffer, out)
+		_ = UnMarshalPacket(c.ReadBuffer, out)
 		handler(out)
 	}
 }
@@ -131,8 +133,8 @@ func (s *PacketSystem) DecodePacket(c *Connection) error {
 	if t != websocket.BinaryMessage {
 		return nil
 	}
-	c.Buffer.Buffer = bytes.NewBuffer(m)
-	id, err := binary.ReadUvarint(c.Buffer)
+	c.ReadBuffer.Buffer = bytes.NewBuffer(m)
+	id, err := binary.ReadUvarint(c.ReadBuffer)
 	if err != nil {
 		return err
 	}
